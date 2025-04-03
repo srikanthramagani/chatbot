@@ -21,12 +21,6 @@ To run this project, you’ll need the following:
 
 ### Dependencies
 Listed in `requirements.txt`:
-Flask==2.3.3
-nltk==3.8.1
-pandas==2.2.2
-PyPDF2==3.0.1
-google-generativeai==0.7.2
-gunicorn==22.0.0
 
 ### Additional Setup
 - **Gemini API Key**: Obtain an API key from Google and update it in `app.py`.
