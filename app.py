@@ -1,36 +1,38 @@
 import nltk
 import random
 import pandas as pd
+import os
+import google.generativeai as genai
 from flask import Flask, render_template, request, jsonify, send_file
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from collections import defaultdict
 from PyPDF2 import PdfReader, PdfWriter
-import os
-import google.generativeai as genai
+
+# Secure your API key (REPLACE THIS in production)
+GEMINI_API_KEY = "AIzaSyAMUyC5Hktnr28Gt64ZBKy6x1aKFT3tYcU"
+
+# Configure Gemini API
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# Initialize Flask app
+app = Flask(__name__)
 
 # Set NLTK data path to a local directory (for pre-downloaded resources)
 nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
 
-# Attempt to download required NLTK resources at runtime
-try:
-    nltk.download('punkt')  # Changed from 'punkt_tab' to 'punkt'
-    nltk.download('wordnet')
-    nltk.download('stopwords')
-    nltk.download('omw-1.4')
-except Exception as e:
-    print(f"Warning: NLTK resource download failed ({str(e)}). Using pre-downloaded resources if available.")
+# Ensure required NLTK resources are available
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('omw-1.4', quiet=True)
 
-app = Flask(__name__)
-responses = defaultdict(list)
+# Initialize NLP tools
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
-
-# Configure Gemini API
-GEMINI_API_KEY = "AIzaSyAMUyC5Hktnr28Gt64ZBKy6x1aKFT3tYcU"  # Replace with your actual key
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')  # Initialize model globally
+responses = defaultdict(list)
 
 def preprocess_text(text):
     """Tokenizes, removes stopwords, and lemmatizes text."""
@@ -38,12 +40,10 @@ def preprocess_text(text):
         return "", []
     words = word_tokenize(text.lower())
     processed_words = [lemmatizer.lemmatize(word) for word in words if word.isalnum() and word not in stop_words]
-    key_words = processed_words
-    return " ".join(processed_words), key_words
+    return " ".join(processed_words), processed_words
 
 def load_dataset(filename):
-    """Loads Q&A from CSV and merges with existing responses."""
-    global responses
+    """Loads Q&A from CSV into a dictionary."""
     try:
         dataset = pd.read_csv(filename)
         dataset.columns = ["Pattern", "Response"]
@@ -52,49 +52,37 @@ def load_dataset(filename):
             responses[processed_pattern].append(row['Response'])
             for word in key_words:
                 responses[word].append(row['Response'])
-        print("Dataset loaded successfully from", filename)
+        print("✅ Dataset loaded successfully from", filename)
     except Exception as e:
-        print("Error loading dataset:", e)
+        print("⚠️ Error loading dataset:", e)
 
 def get_gemini_response(user_input):
-    """Fetches a concise response from Gemini API."""
+    """Fetches a response from Gemini API."""
     try:
-        prompt = f"Answer the following question or statement in a concise, readable way (max 200 characters):\n\n{user_input}"
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        # Truncate to 200 characters if needed
-        if len(text) > 200:
-            text = text[:197] + "..."
-        return text
+        response = model.generate_content(user_input)
+        return response.text.strip()[:200] + "..." if len(response.text) > 200 else response.text.strip()
     except Exception as e:
-        print(f"Gemini API error: {str(e)}")
+        print(f"⚠️ Gemini API error: {str(e)}")
         return "Sorry, I couldn’t process that right now!"
 
 def get_best_response(user_input):
-    """Finds the best response from dataset or Gemini API, keeping it concise."""
+    """Finds the best response from dataset or Gemini API."""
     processed_input, key_words = preprocess_text(user_input)
     
-    # Check dataset for full match first
+    # Check dataset for full match
     if processed_input in responses and responses[processed_input]:
-        response = random.choice(responses[processed_input])
-        # Truncate dataset response if too long
-        if len(response) > 200:
-            return response[:197] + "..."
-        return response
+        return random.choice(responses[processed_input])[:200] + "..." if len(responses[processed_input][0]) > 200 else random.choice(responses[processed_input])
     
     # Check dataset for keyword match
     for word in key_words:
         if word in responses and responses[word]:
-            response = random.choice(responses[word])
-            if len(response) > 200:
-                return response[:197] + "..."
-            return response
+            return random.choice(responses[word])[:200] + "..." if len(responses[word][0]) > 200 else random.choice(responses[word])
     
     # Fallback to Gemini API
     return get_gemini_response(user_input)
 
 def compress_pdf(input_path, output_path):
-    """Compresses a PDF file by rewriting it with basic optimization."""
+    """Compresses a PDF file."""
     try:
         reader = PdfReader(input_path)
         writer = PdfWriter()
@@ -107,35 +95,27 @@ def compress_pdf(input_path, output_path):
             writer.write(output_file)
         return True
     except Exception as e:
-        print(f"Error compressing PDF: {str(e)}")
+        print(f"⚠️ Error compressing PDF: {str(e)}")
         return False
 
 def summarize_content(file_path):
-    """Summarizes content concisely using Gemini API."""
+    """Summarizes content using Gemini API."""
     try:
+        text = ""
         if file_path.endswith('.pdf'):
             reader = PdfReader(file_path)
-            text = ""
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif file_path.endswith('.csv'):
             df = pd.read_csv(file_path)
             text = df.to_string()
         else:
-            return ""
-        
-        # Limit summary to 200 characters
-        prompt = f"Summarize the following content in a concise, readable way (max 200 characters):\n\n{text}"
-        response = model.generate_content(prompt)
-        summary = response.text.strip()
-        if len(summary) > 200:
-            summary = summary[:197] + "..."
-        return summary
+            return "Unsupported file type."
+
+        response = model.generate_content(f"Summarize this in 200 characters: {text}")
+        return response.text.strip()[:200] + "..." if len(response.text) > 200 else response.text.strip()
     except Exception as e:
-        print(f"Error summarizing content: {str(e)}")
-        return f"Failed to summarize: {str(e)}"[:200]
+        print(f"⚠️ Error summarizing content: {str(e)}")
+        return "Failed to summarize."
 
 @app.route("/")
 def home():
@@ -143,7 +123,7 @@ def home():
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
-    """Handles file upload, summarizes content, and prepares compressed PDF for download."""
+    """Handles file uploads (PDF & CSV) and processes them."""
     try:
         if 'file' not in request.files:
             return jsonify({"message": "No file uploaded"})
@@ -172,11 +152,11 @@ def upload_file():
         else:
             return jsonify({"message": "Unsupported file type. Please upload a CSV or PDF."})
     except Exception as e:
-        return jsonify({"message": f"Upload failed: {str(e)}"})
+        return jsonify({"message": f"⚠️ Upload failed: {str(e)}"})
 
 @app.route("/download", methods=["GET"])
 def download_file():
-    """Serves the compressed PDF for download."""
+    """Provides a compressed PDF for download."""
     compressed_path = "compressed_file.pdf"
     if os.path.exists(compressed_path):
         return send_file(compressed_path, as_attachment=True, download_name="compressed_file.pdf")
@@ -184,16 +164,14 @@ def download_file():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """Responds to user messages as plain text."""
+    """Handles chatbot queries."""
     try:
-        if "message" not in request.form:
+        user_input = request.form.get("message", "").strip().lower()
+        if not user_input:
             return "No message received"
-        
-        user_input = request.form["message"].strip().lower()
-        response = get_best_response(user_input)
-        return response
+        return get_best_response(user_input)
     except Exception as e:
-        return f"Chat processing failed: {str(e)}"
+        return f"⚠️ Chat processing failed: {str(e)}"
 
 if __name__ == "__main__":
     app.run(debug=True)
