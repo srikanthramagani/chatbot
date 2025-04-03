@@ -10,11 +10,17 @@ from PyPDF2 import PdfReader, PdfWriter
 import os
 import google.generativeai as genai
 
-# Download required NLTK resources
-nltk.download('punkt_tab')
-nltk.download('wordnet')
-nltk.download('stopwords')
-nltk.download('omw-1.4')
+# Set NLTK data path to a local directory (for pre-downloaded resources)
+nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
+
+# Attempt to download required NLTK resources at runtime
+try:
+    nltk.download('punkt')  # Changed from 'punkt_tab' to 'punkt'
+    nltk.download('wordnet')
+    nltk.download('stopwords')
+    nltk.download('omw-1.4')
+except Exception as e:
+    print(f"Warning: NLTK resource download failed ({str(e)}). Using pre-downloaded resources if available.")
 
 app = Flask(__name__)
 responses = defaultdict(list)
