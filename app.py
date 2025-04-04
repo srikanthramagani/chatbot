@@ -21,13 +21,26 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 app = Flask(__name__)
 
 # Set NLTK data path to a local directory (for pre-downloaded resources)
-nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
+# ✅ Automatically download required NLTK data (safe for Render deployment)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
 
-# Ensure required NLTK resources are available
-nltk.download('punkt', quiet=True)
-nltk.download('wordnet', quiet=True)
-nltk.download('stopwords', quiet=True)
-nltk.download('omw-1.4', quiet=True)
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
+
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
+
+try:
+    nltk.data.find('corpora/omw-1.4')
+except LookupError:
+    nltk.download('omw-1.4')
 
 # Initialize NLP tools
 lemmatizer = WordNetLemmatizer()
